@@ -21,10 +21,24 @@ AppDir:
     version: "{{APPIMAGE_VERSION}}"
     icon: sc-controller
     exec: usr/bin/python3
-    exec_args: -c "import os, sys; os.execvp('$APPDIR/usr/bin/scc', ['$APPDIR/usr/bin/scc'] + (sys.argv[1:] if len(sys.argv) > 1 else ['gui']))" $@
+    # Everything after the import and before os.execvp() are hacks to make Glycin work
+    exec_args: -c 'import os, sys; appdir = os.environ["APPDIR"]; library_path = os.environ.get("LD_LIBRARY_PATH", ""); os.environ["LD_LIBRARY_PATH"] = (f"{appdir}/usr/lib" + (f":{library_path}" if library_path else "")); preload = os.environ.get("LD_PRELOAD", "");os.environ["LD_PRELOAD"] = ("appimage-glycin-sandbox-hack.so:appimage-glycin-anylinux-hack.so" + (f":{preload}" if preload else ""));os.execvp("$APPDIR/usr/bin/scc", ["$APPDIR/usr/bin/scc"] + (sys.argv[1:] if len(sys.argv) > 1 else ["gui"]))' $@
 
   after_bundle: |
     set -eu
+
+    # Expose bundled Glycin loaders in the AppImage's bin directory.
+    for loader in "${TARGET_APPDIR}"/usr/libexec/glycin-loaders/*/glycin-*; do
+      [ -f "${loader}" ] && [ -x "${loader}" ] || continue
+      mkdir -p "${TARGET_APPDIR}/bin"
+      ln -sfr "${loader}" "${TARGET_APPDIR}/bin/"
+    done
+
+    # Remove host-specific absolute paths from bundled Glycin loader commands.
+    glycin_conf_dir="${TARGET_APPDIR}/usr/share/glycin-loaders"
+    if [ -d "${glycin_conf_dir}" ]; then
+      find "${glycin_conf_dir}" -type f -name '*.conf' -exec sed -i -e 's|/usr/lib.*/||g' {} +
+    fi
 
     # install python-hidraw-pure and python-ioctl-opt manually as they were only packaged in Debian 14
     # TODO(Martin): Replace URL with just 'hidraw-pure' when https://github.com/vpelletier/python-hidraw/issues/7 is resolved
